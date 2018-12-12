@@ -1,12 +1,6 @@
 # Azure Authentication Method
 Example of Vault Azure Authentication method
 
-Note: The instructions below are missing a step of granting additional permissions to the VM, you will get an error:
-```
-"vm principal id is empty"
-```
-When attempting to login to Vault. Working to identify the resolution.
-
 ## Requirements
 ### Service Principal
 For this example, we will use a Azure Service account as described here - https://www.terraform.io/docs/providers/azurerm/authenticating_via_service_principal.html 
