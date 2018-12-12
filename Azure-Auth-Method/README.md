@@ -1,5 +1,11 @@
-# Azure with Vault and Terraform
-Example of workflows using Azure, Vault and Terraform
+# Azure Authentication Method
+Example of Vault Azure Authentication method
+
+Note: The instructions below are missing a step of granting additional permissions to the VM, you will get an error:
+```
+"vm principal id is empty"
+```
+When attempting to login to Vault. Working to identify the resolution.
 
 ## Requirements
 ### Service Principal
@@ -11,113 +17,15 @@ ARM_CLIENT_ID - The Client ID of the Service Principal.
 ARM_CLIENT_SECRET - The Client Secret associated with the Service Principal.
 ARM_TENANT_ID - The Tenant ID to use.
 
-### Steps
+### Configuration Steps
+#### Azure
 1. Generate Azure Service Principal
 ```
-az ad sp create-for-rbac -n stenio-vault --role Owner --scope /subscriptions/c0a607b2-6372-4ef3-abdb-dbe52a7b56ba
+az ad sp create-for-rbac -n stenio-vault --role Owner --scope /subscriptions/c0a6...6ba
 export AZURE_TENANT_ID=
 export AZURE_CLIENT_ID-=
 export AZURE_CLIENT_SECRET= 
 ```
-2. Create Azure Vault Key
-```
-az group create -n 'StenioResourceGroup' -l westus
-az provider register -n Microsoft.KeyVault
-az keyvault create --name 'StenioKeyVault' --resource-group 'StenioResourceGroup' --location westus
-az keyvault key create --vault-name 'StenioKeyVault' --name 'StenioFirstKey' --protection software
-```
-3. Update permissions!
-```
-Go to app registrations, select service principal, click "permissions", select API, Azure.KeyVault, grant permission to use, save, press "grant"
-Go to Azure Key Vault, select vault, click permissions, add service principal, grant permissions, press "Save"
-```
-4. Start Vault
-```
-export VAULT_ADDR=http://127.0.0.1:8200
-vault server -config=vault_config &
-vault operator init -stored-shares=1 -recovery-shares=1 -recovery-threshold=1 -key-shares=1 -key-threshold=1
-# Output:
-# Recovery Key 1: 5jocoSL95C/dbrL1rnlVyLHVQxOBZt8nTlc+Te+utdk=
-#
-# Initial Root Token: 123nNANuMHj2K9Cq3IAvcZex
-#
-# Success! Vault is initialized
-
-# and vault status
-#Key                      Value
-# ---                      -----
-# Recovery Seal Type       shamir
-# Sealed                   false
-# Total Recovery Shares    1
-# Threshold                1
-# Version                  0.11.0-beta1+ent
-# Cluster Name             vault-cluster-986344a8
-# Cluster ID               c75eb849-7bf3-c39f-8c64-630e55bcbca1
-# HA Enabled               false
-```
-5. Login as root
-```
-# Note: it is not best practice to operate with the root token, create an admin user instead!
-export VAULT_TOKEN=123nNANuMHj2K9Cq3IAvcZex
-```
-6. Seal Vault
-```
-vault operator seal
-vault status
-
-# Output: it is sealed!
-```
-7. Unseal Vault
-```
-vault operator unseal
-# You will be prompted for the recovery key(s)
-```
-8. Kill and restart Vault process
-```
-ps aux | grep vault
-kill -9 VAULT_PID
-vault server -config=vault_config.hcl &
-
-# Output:
-# ...
-# ==> Vault server started! Log data will stream in below:
-#
-# 2018-12-11T18:19:49.691-0600 [INFO ] core: stored unseal keys supported, attempting fetch
-# 2018-12-11T18:19:49.882-0600 [INFO ] core: vault is unsealed
-# 2018-12-11T18:19:49.882-0600 [INFO ] core: post-unseal setup starting
-# 2018-12-11T18:19:50.379-0600 [INFO ] core: loaded wrapping token key
-...
-```
-
-### Hashicorp Vault
-Standing up and unsealing a Vault server is outside the scope of this guide. Instructions can be found here https://github.com/hashicorp/vault-guides/tree/master/operations/provision-vault
-
-... but if you really want, you can start a quick dev server in your local machine:
-1. Download Vault https://www.vaultproject.io/downloads.html
-2. Unzip and run
-```
-# Run Vault in the background, in dev mode
-vault server -dev -dev-root-token-id="root" &
-export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=root
-```
-
-
-## Azure Secret Engine
-### Azure:
-To configure and enable the Azure Service principal used by Vault:
-1. Execute:
-```
-cd azure-secret-engine-demo
-export ARM_SUBSCRIPTION_ID
-export ARM_CLIENT_ID
-export ARM_CLIENT_SECRET
-export ARM_TENANT_ID
-terraform init
-terraform plan
-# This will show the expected output - it will create an application, a service principal and associate a role in Azure.
-terraform apply 
-``` 
 2. Now go to Azure UI (not available as Terraform resource yet - https://github.com/terraform-providers/terraform-provider-azurerm/issues/2459) 
 ```
 Click on search at the top right and search for "App Registrations"
@@ -126,73 +34,169 @@ Change the filter to "All apps"
 
 Search for the app name (vault-admin in the above example), and click on it
 
-Click on "Settings > Required Permissions > Add > Select API > Windows Azure Active Directory" (if not grayed out)
+Click on "Settings > Required Permissions > Add > Select API > Microsoft Graph" 
 
-Click on "Windows Azure Active Directory" and check the permissions:
+Select required permissions
 
-Read and Write directory data
-Read and Write all applications
 Click on Save
 
 Click on "Grant Permissions"
 
 ```
 3. Alternatively, if you can find the API id and Permission ID, you can use the Azure CLI: https://docs.microsoft.com/en-us/cli/azure/ad/app/permission?view=azure-cli-latest#az-ad-app-permission-add
+###
 
-### Vault
-1. Enable Secret Engine
+#### Vault
+For the Vault commands, ensure you have:
+- Vault binary
+- export VAULT_ADDR
+- export VAULT_TOKEN
+
+1. Enable auth method
 ```
-# Create config file
-{
-  "type": "azure",
+vault auth enable azure
+```
+2. Configure
+```
+# Note that "resource" must be a resource id visible to the VM. You can use the Service Principal app_id you created for Vault in the above steps
+vault write auth/azure/config \
+    tenant_id=0e3...c52ec \
+    resource=AZURE_APP_ID \
+    client_id=f2fbd...b4e \
+    client_secret=a7545...48135c
+```
+3. (Optional) Create Vault ACL policy
+```
+cat <<POLICY | tee azure-policy.hcl
+path "secret/azure/*" {
+  capabilities = ["create", "update", "read", "delete"]
 }
+POLICY
+vault policy-write azure azure-policy.hcl
+```
+4. Create a role.
+Here you can associate a Vault policy to:
+- bound_resource_group_names 
+- bound_service_principal_ids
+- bound_group_ids 
+- bound_location
+- bound_subscription_ids 
+- bound_scale_sets 
+You don't need to set all, you have flexibility on how restrictive you want to be accepting login requests.
+```
+vault write auth/azure/role/azure-role \
+    policies="azure" \
+    bound_resource_group_names=StenioResourceGroup 
+```
 
-curl     --header "X-Vault-Token: $VAULT_TOKEN"     --request POST     --data @payload.json     $VAULT_ADDR/v1/sys/mounts/azure
+### Authentication Steps
+Now it is time to authenticate!
+
+#### Using Vault Agent
+Vault Agent allows you to standardize auth steps regardless of platform. More info https://www.vaultproject.io/docs/agent/index.html
+1. Create a VM in Azure
 ```
-2. Configure Secret Engine
+az group create --name StenioResourceGroup --location westus
+az vm create \
+  --resource-group StenioResourceGroup \
+  --name StenioVM \
+  --image UbuntuLTS \
+  --admin-username azureuser \
+  --generate-ssh-keys
 ```
-# Create config file
-{
-  "subscription_id": "94ca80...",
-  "tenant_id": "d0ac7e...",
-  "client_id": "e607c4...",
-  "client_secret": "9a6346...",
-  "environment": "AzurePublicCloud"
+2. Create a Managed Identity and assign to the VM:
+```
+- In the Azure UI, on the top search bar, type "Managed Identities"
+- Click Add, enter name (stenio-identity for example), select location close to you (uswest for example) and save
+- Press "refresh" to see your new identity
+- Go back to your Virtual Machine
+- Select your virtual machine, click on "Identity"
+- Click "add" and select your new identity 
+```
+
+2. Install Vault Agent 
+```
+ssh azureuser@PUBLIC_IP_OF_VM
+wget https://releases.hashicorp.com/vault/1.0.0/vault_1.0.0_linux_amd64.zip
+sudo apt install unzip
+unzip vault_1.0.0_linux_amd64.zip vault
+
+# Check that it is working
+./vault -v
+./vault agent -h
+```
+3. Still in the VM, create config file 
+```
+# Here, the "resource" should match what you defined when creating the Vault role. 
+# For example, if you used "AZURE_APP_ID" in the role, here you should have the same AZURE_APP_ID in this field.
+
+cat <<CONFIG | tee vault-agent.hcl
+pid_file = "./pidfile"
+
+auto_auth {
+        method "azure" {
+                config = {
+                        role = "azure-role"
+                        resource = "AZURE_APP_ID"
+                }
+        }
+
+        sink "file" {
+                config = {
+                        path = "/tmp/.vault-token"
+                }
+        }
 }
+CONFIG
+```
+4. Run the agent as a background process
+```
+./vault agent -config=vault-agent.hcl &
+```
+5. Validate token present
+```
+cat /tmp/.vault-token
+```
+#### Manual (script)
+If you prefer, or to understand what Vault Agent is doing behind the scenes, you can also authenticate manually:
 
-curl     --header "X-Vault-Token: $VAULT_TOKEN"     --request POST     --data @payload.json     $VAULT_ADDR/v1/azure/config
+1. Get JWT token from instance metadata
 ```
-3. Create roles
+# Ensure you are inside the Azure vm
+# Replace AZURE_APP_ID with the value used when configuring Vault
+curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=AZURE_APP_ID' -H Metadata:true -s
 ```
-# payload.json
+2. Send a request to Vault
+```
+# Create a login payload:
+cat <<PAYLOAD | tee vault-agent.hcl
 {
-    "name": "test", 
-    "azure_roles": "[{ \"role_name\": \"Contributor\" ,\"scope\": \"/subscriptions/YOUR-SUBSCRIPTION-ID\"}]" 
+    "role": "azure-role",
+    "jwt": "JWT_TOKEN_FROM_METADATA",
+    "subscription_id": "c0...56ba",
+    "resource_group_name": "StenioResourceGroup",
+    "vm_name": "StenioVM"
 }
+PAYLOAD
 
-# Configure Azure user with this role
- curl     --header "X-Vault-Token: $VAULT_TOKEN"      --request POST     --data @payload.json     $VAULT_ADDR/v1/azure/roles/test-role
-
-# Create user and retrieve creds
-curl     --header "X-Vault-Token: $VAULT_TOKEN"      --request GET    $VAULT_ADDR/v1/azure/creds/test-role 
-
-# Output
-{
-  "request_id": "2f9d37b4-502d-b80f-8242-e455fa3cd1c1",
-  "lease_id": "azure/creds/test-role/2orH1EXH2k6fA8xoWVjy0Jml",
-  "renewable": true,
-  "lease_duration": 2764800,
-  "data": {
-    "client_id": "xxx",
-    "client_secret": "xxx"
-  },
-  "wrap_info": null,
-  "warnings": null,
-  "auth": null
-}
-
-# User will have the "vault-" prefix. 
-# You can see this user on Azure by issuing the command:
-az ad sp list --query "[?contains(appId, 'GENERATED-CLIENT-ID')]"
+# Ensure you have your Vault address. 
+# You might need to deploy Vault in a remote machine anywhere accessible by internet and open port 8200:
+curl \
+    --request POST \
+    --data @payload.json \
+    $VAULT_ADDR/v1/auth/azure/login
 ```
 
+
+6. If you prefer, you can do the authentication without using Vault
+```
+curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=AZURE_APP_ID' -H Metadata:true -s
+cat <<PAYLOAD | tee payload.json
+ {
+    "role": "azure-role",
+    "jwt": "eyJ0...m7w",
+    "subscription_id": "c0a60...ba",
+    "resource_group_name": "StenioResourceGroup",
+    "vm_name": "StenioVM"
+}
+PAYLOAD

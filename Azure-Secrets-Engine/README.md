@@ -1,8 +1,11 @@
-# Azure with Vault and Terraform
-Example of workflows using Azure, Vault and Terraform
+# Azure Secret Engine
+Example of Vault's Azure Secret Engine to create dynamic Azure Service Principals or rotate password of existing ones.
 
 ## Requirements
-### Service Principal
+### Terraform (Optional)
+For creating and configuring the Azure Service Principal used by Vault, you can leverage Terraform.
+This is great for larger deployments. If you just want to demo basic functionality, you will have the option to run the Azure client instead.
+#### Service Principal
 For this example, we will use a Azure Service account as described here - https://www.terraform.io/docs/providers/azurerm/authenticating_via_service_principal.html 
 
 Either execute the instructions or set environment variables: 
@@ -11,7 +14,7 @@ ARM_CLIENT_ID - The Client ID of the Service Principal.
 ARM_CLIENT_SECRET - The Client Secret associated with the Service Principal.
 ARM_TENANT_ID - The Tenant ID to use.
 
-### Terraform
+#### Terraform Installation
 1. Download Terraform https://www.terraform.io/downloads.html
 2. Unzip 
 3. Clone this repository
@@ -23,7 +26,7 @@ cd THIS-REPO
 ### Hashicorp Vault
 Standing up and unsealing a Vault server is outside the scope of this guide. Instructions can be found here https://github.com/hashicorp/vault-guides/tree/master/operations/provision-vault
 
-... but if you really want, you can start a quick dev server in your local machine:
+... however if you really want, you can start a quick dev server in your local machine:
 1. Download Vault https://www.vaultproject.io/downloads.html
 2. Unzip and run
 ```
@@ -37,7 +40,8 @@ export VAULT_TOKEN=root
 ## Azure Secret Engine
 ### Azure:
 To configure and enable the Azure Service principal used by Vault:
-1. Execute:
+1. Create Service Principal
+If using Terraform, execute:
 ```
 cd azure-secret-engine-demo
 export ARM_SUBSCRIPTION_ID
@@ -49,13 +53,18 @@ terraform plan
 # This will show the expected output - it will create an application, a service principal and associate a role in Azure.
 terraform apply 
 ``` 
+Or, if you prefer the Azure CLI:
+```
+az ad sp create-for-rbac -n hug-demo-vault-admin --role Owner --scope /subscriptions/c0a...6ba
+```
+
 2. Now go to Azure UI (not available as Terraform resource yet - https://github.com/terraform-providers/terraform-provider-azurerm/issues/2459) 
 ```
 Click on search at the top right and search for "App Registrations"
 
 Change the filter to "All apps"
 
-Search for the app name (vault-admin in the above example), and click on it
+Search for the app name (hug-demo-vault-admin in the above example), and click on it
 
 Click on "Settings > Required Permissions > Add > Select API > Windows Azure Active Directory" (if not grayed out)
 
