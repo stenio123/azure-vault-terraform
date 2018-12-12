@@ -103,18 +103,19 @@ az vm create \
   --image UbuntuLTS \
   --admin-username azureuser \
   --generate-ssh-keys
+  --assign-identity
+
 ```
-2. Create a Managed Identity and assign to the VM:
+2. Associate a system identity to the VM:
 ```
-- In the Azure UI, on the top search bar, type "Managed Identities"
-- Click Add, enter name (stenio-identity for example), select location close to you (uswest for example) and save
-- Press "refresh" to see your new identity
-- Go back to your Virtual Machine
-- Select your virtual machine, click on "Identity"
-- Click "add" and select your new identity 
+Go to Azure UI:
+- Select Virtual Machines
+- Click on your machine
+- Click Identity
+- On the "System assigned" tab, select "on", and click save
 ```
 
-2. Install Vault Agent 
+3. Install Vault Agent 
 ```
 ssh azureuser@PUBLIC_IP_OF_VM
 wget https://releases.hashicorp.com/vault/1.0.0/vault_1.0.0_linux_amd64.zip
@@ -125,7 +126,7 @@ unzip vault_1.0.0_linux_amd64.zip vault
 ./vault -v
 ./vault agent -h
 ```
-3. Still in the VM, create config file 
+4. Still in the VM, create config file 
 ```
 # Here, the "resource" should match what you defined when creating the Vault role. 
 # For example, if you used "AZURE_APP_ID" in the role, here you should have the same AZURE_APP_ID in this field.
@@ -149,11 +150,11 @@ auto_auth {
 }
 CONFIG
 ```
-4. Run the agent as a background process
+5. Run the agent as a background process
 ```
 ./vault agent -config=vault-agent.hcl &
 ```
-5. Validate token present
+6. Validate token present
 ```
 cat /tmp/.vault-token
 ```
