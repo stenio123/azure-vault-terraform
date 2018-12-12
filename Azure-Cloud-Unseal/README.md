@@ -1,5 +1,10 @@
-# Azure with Vault and Terraform
-Example of workflows using Azure, Vault and Terraform
+# Azure Cloud Seal
+Example of Vault Cloud Seal with Azure Key. 
+For this example we will use a local installation of Vault just to test this functionality.
+
+## Caveat
+If Vault loses access to the Azure seal, it will work normally, but it won't be able to unseal if sealed or process killed.
+If needed, you can migrate to a different seal at any time: https://www.vaultproject.io/docs/concepts/seal.html#seal-migration
 
 ## Requirements
 ### Service Principal
@@ -31,11 +36,13 @@ az keyvault key create --vault-name 'StenioKeyVault' --name 'StenioFirstKey' --p
 Go to app registrations, select service principal, click "permissions", select API, Azure.KeyVault, grant permission to use, save, press "grant"
 Go to Azure Key Vault, select vault, click permissions, add service principal, grant permissions, press "Save"
 ```
-4. Start Vault
+4. Download and start Vault locally
+- Go to https://www.vaultproject.io/downloads.html and download and unzip Vault
+- Execute: (you might need to adjust commands for Windows)
 ```
 export VAULT_ADDR=http://127.0.0.1:8200
 vault server -config=vault_config &
-vault operator init -stored-shares=1 -recovery-shares=1 -recovery-threshold=1 -key-shares=1 -key-threshold=1
+vault operator init -stored-shares=1 -recovery-shares=1 -recovery-threshold=1 
 # Output:
 # Recovery Key 1: 5jocoSL9....nTlc+Te+utdk=
 #
@@ -87,4 +94,9 @@ vault server -config=vault_config.hcl &
 # 2018-12-11T18:19:49.882-0600 [INFO ] core: post-unseal setup starting
 # 2018-12-11T18:19:50.379-0600 [INFO ] core: loaded wrapping token key
 ...
+```
+9. To migrate to a different seal:
+```
+# Check https://www.vaultproject.io/docs/concepts/seal.html#seal-migration
+vault operator unseal -migrate
 ```
