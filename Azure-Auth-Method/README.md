@@ -2,43 +2,32 @@
 Example of Vault Azure Authentication method
 
 ## Requirements
-### Service Principal
-For this example, we will use a Azure Service account as described here - https://www.terraform.io/docs/providers/azurerm/authenticating_via_service_principal.html 
-
-Either execute the instructions or set environment variables: 
-ARM_SUBSCRIPTION_ID - The ID of the Azure Subscription in which to run the Acceptance Tests.
-ARM_CLIENT_ID - The Client ID of the Service Principal.
-ARM_CLIENT_SECRET - The Client Secret associated with the Service Principal.
-ARM_TENANT_ID - The Tenant ID to use.
+- Azure CLI installed
+- Vault unsealed and running
+- jq https://stedolan.github.io/jq/download/
 
 ### Configuration Steps
 #### Azure
-1. Generate Azure Service Principal
+1. Determine your Azure subscription id
 ```
-az ad sp create-for-rbac -n stenio-vault --role Owner --scope /subscriptions/c0a6...6ba
-export AZURE_TENANT_ID=
-export AZURE_CLIENT_ID-=
-export AZURE_CLIENT_SECRET= 
+AZURE_SUBSCRIPTION=$(az account show | jq -r .id)
 ```
-2. Now go to Azure UI (not available as Terraform resource yet - https://github.com/terraform-providers/terraform-provider-azurerm/issues/2459) 
+2. Create Azure role with minimal permissions
 ```
-Click on search at the top right and search for "App Registrations"
-
-Change the filter to "All apps"
-
-Search for the app name (vault-admin in the above example), and click on it
-
-Click on "Settings > Required Permissions > Add > Select API > Microsoft Graph" 
-
-Select required permissions
-
-Click on Save
-
-Click on "Grant Permissions"
-
+az role definition create --role-definition '{ "Name": "Vault Auth - ReadOnly", "Description": "Access VM information to authenticate VMs with vault.", "Actions": [ "Microsoft.Compute/virtualMachines/*/read", "Microsoft.Compute/virtualMachineScaleSets/*/read"], "AssignableScopes": ["/subscriptions/$AZURE_SUBSCRIPTION"]}
 ```
-3. Alternatively, if you can find the API id and Permission ID, you can use the Azure CLI: https://docs.microsoft.com/en-us/cli/azure/ad/app/permission?view=azure-cli-latest#az-ad-app-permission-add
-###
+3. Generate Azure Service Principal
+```
+AZURE_APP_CREDS=$(az ad sp create-for-rbac -n "vault-test" \
+  --role “Vault Auth - ReadOnly” \
+  --years 3 \
+  --scopes /subscriptions/$AZURE_SUBSCRIPTION)
+
+# Configure environment variables:
+export AZURE_TENANT_ID=$(echo $AZURE_APP_CREDS | jq .tenant)
+export AZURE_CLIENT_ID=$(echo $AZURE_APP_CREDS | jq .appId)
+export AZURE_CLIENT_SECRET= $(echo $AZURE_APP_CREDS | jq .password)
+```
 
 #### Vault
 For the Vault commands, ensure you have:
@@ -52,12 +41,12 @@ vault auth enable azure
 ```
 2. Configure
 ```
-# Note that "resource" must be a resource id visible to the VM. You can use the Service Principal app_id you created for Vault in the above steps
+# Note that "resource" must be a resource id visible to the VM. You can use the example string or Service Principal app_id you created for Vault in the above steps. Make sure you use the same resource on the client side!
 vault write auth/azure/config \
-    tenant_id=0e3...c52ec \
-    resource=AZURE_APP_ID \
-    client_id=f2fbd...b4e \
-    client_secret=a7545...48135c
+    tenant_id=$AZURE_TENANT_ID \
+    resource="https://management.azure.com" \
+    client_id=$AZURE_CLIENT_ID \
+    client_secret=$AZURE_CLIENT_SECRET
 ```
 3. (Optional) Create Vault ACL policy
 ```
@@ -80,14 +69,16 @@ You don't need to set all, you have flexibility on how restrictive you want to b
 ```
 vault write auth/azure/role/azure-role \
     policies="azure" \
-    bound_resource_group_names=StenioResourceGroup 
+    bound_resource_group_names=StenioResourceGroup \
+    bound_subscription_ids=$AZURE_SUBSCRIPTION 
 ```
 
 ### Authentication Steps
 Now it is time to authenticate!
 
 #### Using Vault Agent
-Vault Agent allows you to standardize auth steps regardless of platform. More info https://www.vaultproject.io/docs/agent/index.html
+Vault Agent allows you to standardize auth steps regardless of platform, and it will manage token lifecycle in the background. 
+More info https://www.vaultproject.io/docs/agent/index.html
 1. Create a VM in Azure
 ```
 az group create --name StenioResourceGroup --location westus
@@ -100,16 +91,7 @@ az vm create \
   --assign-identity
 
 ```
-2. Associate a system identity to the VM:
-```
-Go to Azure UI:
-- Select Virtual Machines
-- Click on your machine
-- Click Identity
-- On the "System assigned" tab, select "on", and click save
-```
-
-3. Install Vault Agent 
+2. Install Vault Agent 
 ```
 ssh azureuser@PUBLIC_IP_OF_VM
 wget https://releases.hashicorp.com/vault/1.0.0/vault_1.0.0_linux_amd64.zip
@@ -120,7 +102,7 @@ unzip vault_1.0.0_linux_amd64.zip vault
 ./vault -v
 ./vault agent -h
 ```
-4. Still in the VM, create config file 
+3. Still in the VM, create config file 
 ```
 # Here, the "resource" should match what you defined when creating the Vault role. 
 # For example, if you used "AZURE_APP_ID" in the role, here you should have the same AZURE_APP_ID in this field.
@@ -132,7 +114,7 @@ auto_auth {
         method "azure" {
                 config = {
                         role = "azure-role"
-                        resource = "AZURE_APP_ID"
+                        resource = "https://management.azure.com"
                 }
         }
 
@@ -144,11 +126,11 @@ auto_auth {
 }
 CONFIG
 ```
-5. Run the agent as a background process
+4. Run the agent as a background process
 ```
 ./vault agent -config=vault-agent.hcl &
 ```
-6. Validate token present
+5. Validate token present
 ```
 cat /tmp/.vault-token
 ```
@@ -158,8 +140,8 @@ If you prefer, or to understand what Vault Agent is doing behind the scenes, you
 1. Get JWT token from instance metadata
 ```
 # Ensure you are inside the Azure vm
-# Replace AZURE_APP_ID with the value used when configuring Vault
-curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=AZURE_APP_ID' -H Metadata:true -s
+# If desired, you can replace the "resource" field with the value used when configuring Vault
+curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com' -H Metadata:true -s
 ```
 2. Send a request to Vault
 ```
@@ -168,9 +150,9 @@ cat <<PAYLOAD | tee vault-agent.hcl
 {
     "role": "azure-role",
     "jwt": "JWT_TOKEN_FROM_METADATA",
-    "subscription_id": "c0...56ba",
-    "resource_group_name": "StenioResourceGroup",
-    "vm_name": "StenioVM"
+    "subscription_id": "SUBSCRIPTION_ID_FROM_METADATA",
+    "resource_group_name": "RESOURCE_GROUP_FROM_METADATA",
+    "vm_name": "VM_NAME_FROM_METADATA"
 }
 PAYLOAD
 
@@ -181,17 +163,3 @@ curl \
     --data @payload.json \
     $VAULT_ADDR/v1/auth/azure/login
 ```
-
-
-6. If you prefer, you can do the authentication without using Vault
-```
-curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=AZURE_APP_ID' -H Metadata:true -s
-cat <<PAYLOAD | tee payload.json
- {
-    "role": "azure-role",
-    "jwt": "eyJ0...m7w",
-    "subscription_id": "c0a60...ba",
-    "resource_group_name": "StenioResourceGroup",
-    "vm_name": "StenioVM"
-}
-PAYLOAD

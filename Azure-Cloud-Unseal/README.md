@@ -8,18 +8,13 @@ If needed, you can migrate to a different seal at any time: https://www.vaultpro
 
 ## Requirements
 ### Service Principal
-For this example, we will use a Azure Service account as described here - https://www.terraform.io/docs/providers/azurerm/authenticating_via_service_principal.html 
-
-Either execute the instructions or set environment variables: 
-ARM_SUBSCRIPTION_ID - The ID of the Azure Subscription in which to run the Acceptance Tests.
-ARM_CLIENT_ID - The Client ID of the Service Principal.
-ARM_CLIENT_SECRET - The Client Secret associated with the Service Principal.
-ARM_TENANT_ID - The Tenant ID to use.
+- Azure CLI installed
 
 ### Steps
 1. Generate Azure Service Principal
 ```
 az ad sp create-for-rbac -n stenio-vault --role Owner --scope /subscriptions/c0a...6ba
+# With values from output, export:
 export AZURE_TENANT_ID=
 export AZURE_CLIENT_ID-=
 export AZURE_CLIENT_SECRET= 
